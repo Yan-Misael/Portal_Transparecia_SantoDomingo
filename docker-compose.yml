@@ -1,0 +1,83 @@
+# ============================================================================
+#  docker-compose.yml — Portal de Transparencia Santo Domingo (ICI 4247)
+#  Orquesta los tres servicios del sistema (EF6):
+#    db  -> PostgreSQL 15
+#    api -> Backend Node/Express + Prisma (migra, siembra y arranca)
+#    web -> Frontend (build de Vite servido por Nginx)
+#
+#  Uso:   docker compose up -d --build
+#  Las variables se leen del archivo .env ubicado junto a este compose.
+# ============================================================================
+name: portal-transparencia-santodomingo
+
+services:
+  # --------------------------------------------------------------------------
+  # Base de datos relacional
+  # --------------------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: transparencia_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # La API espera (depends_on) hasta que este healthcheck pase, evitando
+    # la condición de carrera clásica "la API arranca antes que Postgres".
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # --------------------------------------------------------------------------
+  # API (Backend)
+  # --------------------------------------------------------------------------
+  api:
+    build:
+      context: ./BackEnd
+      dockerfile: dockerfile
+    container_name: transparencia_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: ${PORT}
+      # NOTA IMPORTANTE: la CLI de Prisma (migrate/seed) lee DATABASE_URL de
+      # forma directa, sin pasar por la reescritura de src/config/db.js. Por eso
+      # aquí el host es el nombre del servicio interno ("db") y no "localhost".
+      DATABASE_URL: "postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?schema=public"
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      MINDICADOR_API_URL: ${MINDICADOR_API_URL}
+    ports:
+      - "${PORT}:${PORT}"
+    # Secuencia de arranque: aplicar migraciones -> sembrar datos -> servir.
+    # `migrate deploy` es idempotente; el seed también (usa upserts).
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && npm start"
+
+  # --------------------------------------------------------------------------
+  # Web (Frontend)
+  # --------------------------------------------------------------------------
+  web:
+    build:
+      context: ./FrontEnd
+      dockerfile: Dockerfile
+      args:
+        # Vite hornea esta URL en el bundle; debe ser alcanzable por el
+        # navegador (puerto publicado de la API en el host).
+        VITE_API_URL: ${VITE_API_URL}
+    container_name: transparencia_web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
