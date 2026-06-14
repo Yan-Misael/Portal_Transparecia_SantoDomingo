@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js" 
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Usuario {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String   // Almacenará el hash de bcrypt
+  nombre    String
+  rol       String   @default("USUARIO") //defecto
+  creadoEn  DateTime @default(now())
+}
+
+model Departamento {
+  id           Int           @id @default(autoincrement())
+  nombre       String        @unique
+  descripcion  String?
+  presupuestos Presupuesto[]
+  contratos    Contrato[]
+}
+
+model Presupuesto {
+  id             Int          @id @default(autoincrement())
+  ano            Int
+  montoAsignado  Decimal      @db.Decimal(15, 2)
+  montoEjecutado Decimal      @db.Decimal(15, 2)
+  departamentoId Int
+  departamento   Departamento @relation(fields: [departamentoId], references: [id])
+  actualizadoEn  DateTime     @updatedAt
+
+  @@index([departamentoId])
+  @@index([ano])
+}
+
+model Contrato {
+  id             Int          @id @default(autoincrement())
+  titulo         String
+  proveedor      String
+  monto          Decimal      @db.Decimal(15, 2)
+  fechaInicio    DateTime
+  fechaTermino   DateTime?
+  departamentoId Int
+  departamento   Departamento @relation(fields: [departamentoId], references: [id])
+
+  @@index([departamentoId])
+  @@index([fechaInicio])
+}
