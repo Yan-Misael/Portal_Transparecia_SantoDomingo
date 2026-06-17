@@ -227,7 +227,6 @@ El sistema utiliza una base de datos relacional administrada a través de **Pris
 
 > **Nota:** Las restricciones de integridad, claves foráneas y tipos de datos están definidos en el archivo `BackEnd/prisma/schema.prisma`.
 
-
 ## Requisitos previos
 
 Antes de empezar, instala lo siguiente:
@@ -261,39 +260,71 @@ Si los tres responden con un número de versión, estás listo.
 
 ---
 
-## Puesta en marcha — Paso a paso
+## Puesta en marcha
 
-Necesitarás **dos terminales de PowerShell** abiertas al mismo tiempo: una para el BackEnd y otra para el FrontEnd.
+### Parte 0 — Requisitos previos
+Tener Docker Desktop instalado y abierto.
 
-### Parte A — BackEnd (Terminal 1)
+Verificar que responde:
 
-#### A.1 Abre Docker Desktop
+docker compose version
 
-Confirma que el ícono de la ballena esté en verde antes de seguir.
+Si docker compose version falla pero existe docker-compose --version (con guion), usa esa forma en todos los comandos de esta guía.
 
-#### A.2 Entra a la carpeta del BackEnd
+Tener libres los puertos 8080, 3000 y 5432 del computador. Si alguno está ocupado, ver la sección Solución de problemas al final.
 
-En la **Terminal 1**, navega a la carpeta del backend. Reemplaza la ruta por la que corresponda a tu computador:
+### Parte 1 — Obtener el código y ubicarse
 
-```powershell
-cd C:\Users\TuUsuario\Desktop\Portal_ICI4247-main\BackEnd
-```
+Descomprimir el .zip del proyecto.
 
-> **Truco:** en el Explorador de Windows puedes hacer clic en la barra de direcciones para ver la ruta completa y copiarla.
+Entrar a la carpeta que contiene el archivo docker-compose.yml:
 
-#### A.3 Crea el archivo `.env`
+cd Portal_Transparencia_SantoDomingo_Final
 
-Este paso es **obligatorio**. El archivo `.env` contiene las credenciales de la base de datos. No viene en el repositorio por seguridad. La carpeta incluye un `.env.example` que muestra qué variables se necesitan.
-
-La forma más segura en Windows es crear el archivo desde PowerShell:
+Abre una terminal PowerShell:
 
 ```powershell
-notepad .env
+Test-Path docker-compose.yml
 ```
 
-Notepad se abrirá. Pega este contenido tal cual:
+(Debe imprimir True.)
 
-```env
+bash:
+
+```
+ls docker-compose.yml
+```
+
+(Debe listar el archivo, sin error.)
+
+Todos los comandos siguientes se ejecutan desde esta carpeta.
+
+### Parte 2 — Crear el archivo .env
+
+El docker-compose.yml lee sus variables de un archivo .env ubicado en esta misma carpeta.
+
+Opción A: copiar desde el ejemplo
+
+El proyecto incluye .env.example. Cópialo a .env:
+
+```
+Copy-Item .env.example .env
+```
+
+bash:
+
+```
+cp .env.example .env
+```
+
+Si el comando dice que .env.example no existe, es porque ese archivo (empieza con punto) no se copió al transferir la carpeta. No es un problema: usa la Opción B.
+
+Opción B: crear el .env directamente
+
+Pega el bloque completo en la terminal. Crea el archivo con todo lo necesario.
+
+```
+# Configuración del servidor
 PORT=3000
 JWT_SECRET="supersecretjwtkey_municipalidad2026"
 
@@ -301,156 +332,211 @@ DB_USER="admin"
 DB_PASSWORD="adminpassword"
 DB_NAME="transparencia_db"
 
+# URL de conexión para Prisma ORM (Apunta al nombre del contenedor 'db')
 DATABASE_URL="postgresql://admin:adminpassword@db:5432/transparencia_db?schema=public"
 ```
 
-Guarda (Ctrl+S) y cierra Notepad. Verifica que el archivo existe:
+O en su defecto el del ejemplo:
 
-```powershell
-dir -Force .env
+```
+@'
+PORT=3000
+JWT_SECRET=cambie_esta_clave_por_una_larga_y_aleatoria
+CORS_ORIGINS=http://localhost:5173,http://localhost:8080
+MINDICADOR_API_URL=https://mindicador.cl/api
+DB_USER=transparencia_user
+DB_PASSWORD=transparencia_pass
+DB_NAME=transparencia_db
+VITE_API_URL=http://localhost:3000/api
+'@ | Set-Content -Encoding utf8 .env
+(En PowerShell, el cierre '@ debe quedar al inicio de la línea, sin espacios antes.)
 ```
 
-Debe aparecer en la lista.
+Verificar que el .env quedó creado
 
-> **Cuidado con la extensión oculta de Windows:** si creas el archivo con clic derecho → "Nuevo documento de texto", Windows le pone `.txt` invisible y queda como `.env.txt`. Por eso usa `notepad .env` desde PowerShell.
+```
+Get-Content .env
+```
 
-#### A.4 Levanta los contenedores
+bash:
+```
+cat .env
+```
 
-```powershell
+No es necesario cambiar ningún valor para correr en local.
+
+### Parte 3 — Construir y levantar todo
+
+Un solo comando construye las imágenes y levanta los tres servicios:
+
+```
 docker compose up -d --build
 ```
 
-Esto descarga las imágenes, construye la API y levanta dos contenedores:
-- `transparencia_db` — la base de datos PostgreSQL.
-- `api_transparencia` — el servidor Express.
+--build construye las imágenes de la API y del frontend.
+-d lo deja corriendo en segundo plano.
 
-La primera vez tarda alrededor de **30 segundos**. Confirma que ambos están corriendo:
+La primera vez tarda varios minutos (descarga imágenes base, instala dependencias de npm y compila el frontend). Es normal. Las siguientes veces es mucho más rápido por la caché.
 
-```powershell
-docker ps
-```
+Qué ocurre por dentro, en orden
+Levanta db (PostgreSQL) y espera a que esté healthy.
+Recién entonces arranca api, que automáticamente: aplica migraciones (prisma migrate deploy), siembra datos (prisma db seed) y arranca el servidor Express.
+Levanta web (Nginx) sirviendo el frontend ya compilado.
 
-Debes ver los dos contenedores con estado `Up`.
+### Parte 4 — Verificar que quedó arriba
 
-#### A.5 Crea las tablas en la base de datos
-
-La base existe pero está vacía. Aplica las migraciones de Prisma para crear las tablas (`Usuario`, `Departamento`, `Presupuesto`, `Contrato`):
-
-```powershell
-docker compose exec api npx prisma migrate deploy
-```
-
-Debes ver un mensaje parecido a `1 migration applied`.
-
-#### A.6 Carga datos reales de Santo Domingo (seed)
-
-Las tablas existen pero están vacías. Para que el portal se vea con contenido desde el primer momento, ejecuta el script de seed. Crea:
-
-- 1 usuario administrador con credenciales conocidas.
-- 18 direcciones municipales reales (Alcaldía, DOM, DAEM, DIDECO, etc.).
-- 22 presupuestos basados en las cifras BEP 2025 oficiales del SINIM.
-- 12 contratos públicos con títulos reales de Mercado Público.
-
-```powershell
-docker compose exec api npm run seed
-```
-
-Al finalizar verás un resumen con las **credenciales del usuario administrador**:
-
-### **Si no funciona**
-
-1. Detener los contenedores y destruir el volumen con ```docker compose down -v```
-2. Reconstruir la infraestructura docker compose up ```-d --build```
-3. Ejecutar migración ```docker compose exec api npx prisma migrate deploy```
+Estado de los tres contenedores:
 
 ```
-  Seed completado correctamente.
-───────────────────────────────────────────────
-   Credenciales de prueba:
-     Email:      admin@santodomingo.cl
-     Contraseña: clave123
-───────────────────────────────────────────────
+docker compose ps
 ```
 
-> El seed es **idempotente**: si lo ejecutas dos veces, la segunda detecta los datos ya cargados y no hace nada. Para reiniciar a un estado limpio, ver la sección "Reiniciar todo desde cero" más abajo.
->
-> Para conocer las fuentes y la trazabilidad de cada dato sembrado, consulta `Otros/FUENTES_DATOS.md`.
+Los tres (transparencia_db, transparencia_api, transparencia_web) deben aparecer como Up. El db debe decir healthy.
 
-#### A.7 Verifica que la API responde
-
-Abre tu navegador y entra a:
+Logs de la API (confirmar migración, seed y arranque):
 
 ```
-http://localhost:3000/api/health
+docker compose logs -f api
 ```
 
-Debe responder:
+Hay que esperar a ver estas señales en el log:
 
-```json
-{"status":"success","message":"API del Portal de Transparencia operando correctamente"}
-```
+All migrations have been successfully applied.
+Seed completado correctamente.
+Servidor inicializado en el puerto 3000 ← cuando aparece esto, la API está lista.
+Salir del visor de logs con Ctrl + C (eso no apaga el contenedor, solo cierra el log).
 
-Si llegas aquí, **el BackEnd está listo**. Deja la Terminal 1 abierta y pasa a la siguiente parte.
+### Parte 5 — Abrir la aplicación
 
----
+Abrir en el navegador, en este orden:
 
-### Parte B — FrontEnd (Terminal 2)
+Qué	URL
 
-#### B.1 Abre una segunda terminal de PowerShell
+Portal (frontend)	http://localhost:8080
 
-Déjala separada de la del BackEnd.
+Login	http://localhost:8080/login
 
-#### B.2 Entra a la carpeta del FrontEnd
+API — prueba del servicio externo	http://localhost:3000/api/indicadores
 
-```powershell
-cd C:\Users\TuUsuario\Desktop\Portal_ICI4247-main\FrontEnd
-```
+## Credenciales del administrador
 
-#### B.3 Crea el archivo `.env`
+Correo:      admin@santodomingo.cl
 
-Igual que en el BackEnd, el FrontEnd necesita su propio `.env`. Créalo con:
+Contraseña:  clave123
 
-```powershell
-notepad .env
-```
+Prueba de extremo a extremo (recomendada)
 
-Pega:
+Iniciar sesión en /login, entrar al panel /admin y crear o editar un presupuesto. Si el cambio se guarda y se ve reflejado, está funcionando la cadena completa: frontend → API → base de datos.
 
-```
-VITE_API_URL=http://localhost:3000/api
-```
+La URL http://localhost:3000/api/indicadores debe devolver un JSON con UF, UTM, dólar y euro: eso confirma la integración con el servicio externo (mindicador.cl). En la portada, arriba, aparece la franja "Indicadores del día" con esos valores.
 
-Guarda y cierra.
+### Parte 6 — Apagar y volver a levantar
 
-#### B.4 Instala las dependencias
-
-```powershell
-npm install
-```
-
-Tarda alrededor de un minuto. Es normal que aparezcan algunos `warning`; ignóralos mientras no haya `error`.
-
-> **OJO:** Si trabajas desde una terminal "PowerShell" en Visual Studio Code y te aparece que la ejecución de scripts está deshabilitada en el sistema. Puedes instalar las dependencias desde una terminal "Command Prompt", abre una tercera terminal cmd y ejecuta de aquí en adelante:
-> ```powershell
-> cd C:\Users\TuUsuario\Desktop\Portal_ICI4247-main\FrontEnd
-> npm install
-> ```
-
-#### B.5 Levanta el servidor de desarrollo
-
-```powershell
-npm run dev
-```
-
-Verás algo como:
+Para detener el proyecto (forma correcta, no cerrar contenedores a mano):
 
 ```
-  VITE v6.3.5  ready in 800 ms
-
-  ➜  Local:   http://localhost:5173/
+docker compose down
 ```
 
-Abre esa URL en el navegador.
+Para volver a levantar más tarde (ya construido, rápido):
+
+```
+docker compose up -d
+```
+
+Para un reinicio totalmente limpio, borrando también la base de datos:
+
+```
+docker compose down -v
+docker compose up -d --build
+```
+
+Solución de problemas
+
+Estos son los errores más comunes y su causa. Aparecen sobre todo cuando se ejecutó el proyecto (o una versión anterior) antes y quedaron restos.
+
+"The container name ... is already in use"
+
+Hay un contenedor con ese nombre de una corrida anterior. Bórralo y vuelve a levantar:
+
+```
+docker compose down --remove-orphans
+docker compose up -d --build
+```
+
+Si el conflicto viene de un proyecto distinto (otro compose), borra el contenedor por nombre:
+
+docker rm -f transparencia_db transparencia_api transparencia_web
+
+"Bind for 0.0.0.0:3000 failed: port is already allocated" (o 8080 / 5432)
+
+Algo ya está usando ese puerto. Primero, ver si es un contenedor viejo:
+
+```
+docker ps -a
+```
+
+Busca en la columna PORTS la fila que mapea el puerto en conflicto y, en la columna NAMES, su nombre. Bórralo:
+
+```
+docker rm -f <nombre_del_contenedor>
+```
+
+Atajo (borra cualquier contenedor que publique el puerto 3000):
+
+```
+docker rm -f $(docker ps -aq --filter "publish=3000")
+```
+
+bash:
+
+```
+docker rm -f $(docker ps -aq --filter "publish=3000")
+```
+
+Si no es un contenedor sino un programa de Windows ocupando el puerto:
+
+netstat -ano | findstr :3000
+
+tasklist /FI "PID eq <numero_que_apareció>"
+
+taskkill /PID <numero> /F
+
+"P1001: Can't reach database server at db:5432" (aunque db esté healthy)
+
+La red interna quedó en un estado inconsistente (típico tras varios intentos fallidos). La solución es bajar todo —incluida la red— y volver a subir limpio:
+
+```
+docker compose down --remove-orphans
+docker compose up -d
+```
+
+Si aun así persiste, es que la API le gana la carrera a PostgreSQL. En docker-compose.yml, en el servicio api, agrega una pequeña espera al inicio del command:
+
+command: sh -c "sleep 5 && npx prisma migrate deploy && npx prisma db seed && npm start"
+
+Luego:
+
+```
+docker compose down --remove-orphans
+docker compose up -d --build
+```
+
+"No se puede acceder a este sitio" / ERR_CONNECTION_REFUSED en localhost:5173
+
+URL equivocada. Con Docker, el portal está en http://localhost:8080. El 5173 no se usa.
+
+cp .env.example .env dice que el archivo no existe
+
+El .env.example (empieza con punto) no se transfirió. Crea el .env con la Opción B de la Parte 2.
+
+Cambié VITE_API_URL y el frontend sigue apuntando a lo anterior
+
+Vite "hornea" esa variable al compilar. Hay que reconstruir el frontend:
+
+```
+docker compose up -d --build web
+```
 
 ---
 
